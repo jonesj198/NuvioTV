@@ -21,28 +21,27 @@ jobs:
 
       - name: 3. Extract Method A Keys from Official NuvioTV Beta APK
         run: |
-          sudo apt-get update && sudo apt-get install -y jadx jq curl
+          sudo apt-get update && sudo apt-get install -y jq curl unzip
+          JADX_VER=$(curl -s https://api.github.com/repos/skylot/jadx/releases/latest | jq -r '.tag_name' | sed 's/^v//')
+          curl -sL "https://github.com/skylot/jadx/releases/download/v${JADX_VER}/jadx-${JADX_VER}.zip" -o jadx.zip
+          sudo unzip -q jadx.zip -d /usr/local/jadx
+          sudo ln -sf /usr/local/jadx/bin/jadx /usr/local/bin/jadx
           cp local.example.properties local.properties
-
           echo "Fetching latest official NuvioTV release APK..."
           APK_URL=$(curl -s https://api.github.com/repos/NuvioMedia/NuvioTV/releases | jq -r '[.[] | .assets[] | select(.name | endswith(".apk"))][0].browser_download_url')
           echo "Downloading from: $APK_URL"
           curl -L -o official.apk "$APK_URL"
-
           echo "Decompiling BuildConfig to extract official keys..."
           jadx -d out_apk --no-res official.apk || true
           BC_FILE=$(find out_apk -name "BuildConfig.java" | head -n 1)
-
           if [ -n "$BC_FILE" ]; then
             echo "Found BuildConfig at $BC_FILE"
             python3 - "$BC_FILE" << 'EOF'
           import sys, re
-
           bc_path = sys.argv[1]
           with open(bc_path, 'r', encoding='utf-8', errors='ignore') as f:
               bc_text = f.read()
 
-          # Extract all public static final String fields from official BuildConfig
           matches = re.findall(r'public static final String (\w+)\s*=\s*"([^"]*)";', bc_text)
           extracted = dict(matches)
 
@@ -59,7 +58,6 @@ jobs:
                       continue
               new_lines.append(line)
 
-          # Ensure any extra keys present in BuildConfig (like TRAKT_CLIENT_ID / TMDB_API_KEY) are appended
           existing_keys = {l.split('=', 1)[0].strip() for l in new_lines if '=' in l and not l.strip().startswith('#')}
           for k, v in extracted.items():
               if k not in existing_keys and any(tok in k for tok in ['KEY', 'ID', 'URL', 'SECRET', 'TOKEN']):
@@ -70,18 +68,15 @@ jobs:
               f.writelines(new_lines)
           EOF
           fi
-
-          # Ensure Dolby Vision Profile 7 -> 8.1 hardware bridge stays enabled for Shield Remuxes
           sed -i 's/USE_LOCAL_FFMPEG_DECODER=.*/USE_LOCAL_FFMPEG_DECODER=false/g' local.properties
           sed -i 's/DOVI_NATIVE_ENABLED=.*/DOVI_NATIVE_ENABLED=true/g' local.properties
-          rm -rf official.apk out_apk
+          rm -rf official.apk out_apk jadx.zip
 
       - name: 4. Apply 2019 Nvidia Shield TV Pro Optimizations
         run: |
           python3 - << 'EOF'
           import glob, re
 
-          # A. Force arm64-v8a ONLY & sign release build cleanly so R8 optimizations run
           with open('app/build.gradle.kts', 'r') as f:
               gradle = f.read()
 
@@ -95,20 +90,16 @@ jobs:
               'include("arm64-v8a")',
               gradle
           )
-
           with open('app/build.gradle.kts', 'w') as f:
               f.write(gradle)
 
-          # B. Tune ExoPlayer DefaultLoadControl for 3GB Shield RAM (200MB hard ceiling + fast 1.5s start)
-          for path in glob.glob('app/src/**/*.kt', recursive=true):
+          for path in glob.glob('app/src/**/*.kt', recursive=True):
               with open(path, 'r', encoding='utf-8', errors='ignore') as f:
                   code = f.read()
               orig = code
 
-              # Cap max buffer bytes to 200MB (200 * 1024 * 1024 = 209715200) to prevent 3GB RAM OOM kills on 100GB remuxes
               code = re.sub(r'setTargetBufferBytes\([^)]+\)', 'setTargetBufferBytes(209715200)', code)
 
-              # Prioritize Just Player (com.brouken.player) when launching External Player intent
               if 'Intent(Intent.ACTION_VIEW)' in code and 'setDataAndType' in code and 'com.brouken.player' not in code:
                   code = code.replace(
                       'Intent(Intent.ACTION_VIEW)',
