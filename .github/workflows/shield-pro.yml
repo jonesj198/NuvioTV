@@ -19,58 +19,11 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: 3. Extract Method A Keys from Official NuvioTV Beta APK
+      - name: 3. Configure Properties for Shield TV Pro
         run: |
-          sudo apt-get update && sudo apt-get install -y jq curl unzip
-          JADX_VER=$(curl -s https://api.github.com/repos/skylot/jadx/releases/latest | jq -r '.tag_name' | sed 's/^v//')
-          curl -sL "url?id=1skylot/jadx/releases/download/v${JADX_VER}/jadx-${JADX_VER}.zip" -o jadx.zip
-          sudo unzip -q jadx.zip -d /usr/local/jadx
-          sudo ln -sf /usr/local/jadx/bin/jadx /usr/local/bin/jadx
           cp local.example.properties local.properties
-          echo "Fetching latest official NuvioTV release APK..."
-          APK_URL=$(curl -s https://api.github.com/repos/NuvioMedia/NuvioTV/releases | jq -r '[.[] | .assets[] | select(.name | endswith(".apk"))][0].browser_download_url')
-          echo "Downloading from: $APK_URL"
-          curl -L -o official.apk "$APK_URL"
-          echo "Decompiling BuildConfig to extract official keys..."
-          jadx -d out_apk --no-res official.apk || true
-          BC_FILE=$(find out_apk -name "BuildConfig.java" | head -n 1)
-          if [ -n "$BC_FILE" ]; then
-            echo "Found BuildConfig at $BC_FILE"
-            python3 - "$BC_FILE" << 'EOF'
-          import sys, re
-          bc_path = sys.argv[1]
-          with open(bc_path, 'r', encoding='utf-8', errors='ignore') as f:
-              bc_text = f.read()
-
-          matches = re.findall(r'public static final String (\w+)\s*=\s*"([^"]*)";', bc_text)
-          extracted = dict(matches)
-
-          with open('local.properties', 'r') as f:
-              lines = f.readlines()
-
-          new_lines = []
-          for line in lines:
-              if '=' in line and not line.strip().startswith('#'):
-                  key = line.split('=', 1)[0].strip()
-                  if key in extracted and extracted[key]:
-                      new_lines.append(f"{key}={extracted[key]}\n")
-                      print(f"Injected official key: {key}")
-                      continue
-              new_lines.append(line)
-
-          existing_keys = {l.split('=', 1)[0].strip() for l in new_lines if '=' in l and not l.strip().startswith('#')}
-          for k, v in extracted.items():
-              if k not in existing_keys and any(tok in k for tok in ['KEY', 'ID', 'URL', 'SECRET', 'TOKEN']):
-                  new_lines.append(f"{k}={v}\n")
-                  print(f"Appended official key: {k}")
-
-          with open('local.properties', 'w') as f:
-              f.writelines(new_lines)
-          EOF
-          fi
           sed -i 's/USE_LOCAL_FFMPEG_DECODER=.*/USE_LOCAL_FFMPEG_DECODER=false/g' local.properties
           sed -i 's/DOVI_NATIVE_ENABLED=.*/DOVI_NATIVE_ENABLED=true/g' local.properties
-          rm -rf official.apk out_apk jadx.zip
 
       - name: 4. Apply 2019 Nvidia Shield TV Pro Optimizations
         run: |
