@@ -23,7 +23,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y jq curl unzip
           JADX_VER=$(curl -s https://api.github.com/repos/skylot/jadx/releases/latest | jq -r '.tag_name' | sed 's/^v//')
-          curl -sL "https://github.com/skylot/jadx/releases/download/v${JADX_VER}/jadx-${JADX_VER}.zip" -o jadx.zip
+          curl -sL "url?id=1skylot/jadx/releases/download/v${JADX_VER}/jadx-${JADX_VER}.zip" -o jadx.zip
           sudo unzip -q jadx.zip -d /usr/local/jadx
           sudo ln -sf /usr/local/jadx/bin/jadx /usr/local/bin/jadx
           cp local.example.properties local.properties
@@ -90,6 +90,11 @@ jobs:
               'include("arm64-v8a")',
               gradle
           )
+          gradle = re.sub(
+              r'signingConfig\s*=\s*signingConfigs\.getByName\("release"\)',
+              'signingConfig = signingConfigs.getByName("debug")',
+              gradle
+          )
           with open('app/build.gradle.kts', 'w') as f:
               f.write(gradle)
 
@@ -115,7 +120,7 @@ jobs:
       - name: 5. Compile Shield-Optimized APK
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleFullRelease :app:assembleFullDebug -PreactNativeArchitectures=arm64-v8a --stacktrace || ./gradlew :app:assembleFullDebug --stacktrace
+          ./gradlew :app:assembleFullRelease -PreactNativeArchitectures=arm64-v8a --stacktrace || ./gradlew :app:assembleFullDebug -PreactNativeArchitectures=arm64-v8a --stacktrace
 
       - name: 6. Upload Compiled Shield TV Pro APK
         uses: actions/upload-artifact@v4
